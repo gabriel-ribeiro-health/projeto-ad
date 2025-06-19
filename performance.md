@@ -3,41 +3,73 @@
 
 ## 📊 Query Principal (LGPD)
 
-A query principal que exibe dados mascarados para conformidade com a LGPD apresentou ótima performance ao processar 5206 internações e retornar 163 eventos de reinternação precoce.
-
-### 🔍 Destaques do `EXPLAIN ANALYZE`
-
-- **Tempo total de execução**: 63.645 ms
-- **Index Scan ativo**: O índice `ain_int_dthr_internacao_i` foi corretamente utilizado nas leituras da tabela `ain_internacoes`.
-- **Função analítica `LEAD()`** executada sobre `pac_codigo, dthr_internacao`, suportada por ordenação eficiente (`WindowAgg` + `Sort`).
-- **Filtros aplicados**: datas válidas de entrada/saída e diferença de até 15 dias entre internações.
-- **Joins com especialidades e pacientes**: otimizados por `Index Scan` e `Memoize`, evitando leituras repetidas.
-- **CIDs**: As tabelas `ain_cids_internacao` e `agh_cids` foram acessadas via `Seq Scan`, comportamento esperado diante da leitura integral sem filtros seletivos.
-
-### 💡 Interpretação Técnica
-
-> "A query principal com LGPD executou de forma altamente performática. Utilizou índices corretos, apresentou caching eficiente em joins (`Memoize`) e distribuiu o plano de execução de forma balanceada entre joins, agregações e transformações. A estrutura está escalável para ambientes de volume médio-alto."
+A query principal que exibe dados mascarados para conformidade com a LGPD apresentou **ótima performance** ao processar **5206 internações** e retornar **163 eventos de reinternação precoce**.
 
 ---
 
-## 🔎 Análise de CIDs
+## ✅ Visão Geral do Plano
 
-### Comportamento:
+**Execution Time: 63.645 ms**
 
-- **Execução**: ~100ms
-- **GroupAggregate + Sort** para agrupar CIDs por internação
-- **Joins hash-based** entre `ain_internacoes`, `ain_cids_internacao` e `agh_cids`
-- **`Seq Scan` usado em `ain_cids_internacao` e `agh_cids`**, por não haver filtros seletivos
-- Índice `ain_int_dthr_internacao_i` **utilizado** corretamente para `ain_internacoes`
+O tempo total de execução foi de **63ms**, o que é excelente considerando:
 
-### Justificativa para Seq Scan:
+- Múltiplos **`JOINs`**
+- Uso de **`LEAD()`** (função analítica)
+- Processamento de **5206 internações**
+- **Mascaramento e transformação** de campos sensíveis (`nome`, `CPF`, `idade`)
 
-Apesar de haver índice em `ain_cids_internacao (int_seq, cid_seq)`, o planner optou por `Seq Scan` porque:
+---
 
-- Não há filtros diretos sobre as colunas indexadas
-- O join exige leitura ampla da tabela
-- O PostgreSQL considera o custo de leitura sequencial menor do que acessos randômicos via índice
-- Tabela `agh_cids` tem apenas ~14k registros → `Seq Scan` é eficiente neste caso
+## 🔍 Quebra passo a passo
+
+### 🔁 Etapa 1 – Subquery com `WindowAgg`
+
+> `WindowAgg → Sort → Index Scan on ain_internacoes`
+
+- Utiliza corretamente o índice **`ain_int_dthr_internacao_i`**
+- Faz ordenação por `pac_codigo, dthr_internacao` para aplicar `LEAD()`
+- Retornou **5206 linhas**, removeu **5043** após filtro → restaram **163 reinternações precoces**
+- Executado em: **~8ms**
+
+---
+
+### 🔗 Etapa 2 – CIDs + Especialidades
+
+> `Nested Loop Left Join (internacoes_ordenadas com ain, esp)`
+> → `GroupAggregate (por seq)` → `Hash Left Join` → `Hash Right Join`
+
+- Agrupa os **CIDs por internação e reinternação**
+- Usa `GroupAggregate + Sort + Hash Join`
+- Os `Seq Scan` em `ain_cids_internacao` e `agh_cids` são **esperados**, pois **não há filtros seletivos**
+- O índice `ain_int_dthr_internacao_i` é **usado novamente**
+- Total dessa parte: **~21ms + 21ms = ~42ms**
+
+---
+
+### 🧠 Etapa 3 – Paciente (`aip_pacientes`)
+
+> `Memoize + Index Scan on aip_pacientes using primary key`
+
+- Excelente uso de `Memoize`, que **evita refazer a leitura** do paciente já consultado
+- 134 **misses** / 29 **hits** → caching já sendo eficiente
+- Executado em: **~2ms**
+
+
+---
+
+## ❓ Justificativa para `Seq Scan`
+
+Apesar da tabela `ain_cids_internacao` possuir índices como:
+
+- `ain_cdi_cid_fk1_i` (`cid_seq`)
+- `ain_cids_internacao_pkey` (`int_seq`, `cid_seq`)
+
+O planner **optou por `Seq Scan`** devido a:
+
+- Ausência de **filtros seletivos diretos**
+- O `JOIN` exige leitura de **toda a tabela**
+- **Custo de leitura sequencial** é mais barato do que múltiplos acessos aleatórios por índice
+- A tabela `agh_cids`, com ~14k registros, também é pequena o suficiente para justificar `Seq Scan`
 
 ---
 
@@ -60,6 +92,7 @@ LEFT JOIN agh.ain_cids_internacao aci ON aci.int_seq = ai.seq
 LEFT JOIN agh.agh_cids ac ON ac.seq = aci.cid_seq
 WHERE ai.dthr_internacao BETWEEN '2024-01-01' AND '2024-12-31'
 GROUP BY ai.seq, ai.pac_codigo, ai.dthr_internacao, ai.dt_saida_paciente, ai.esp_seq;
+
 ```
 
 #### Vantagens:
@@ -72,30 +105,6 @@ GROUP BY ai.seq, ai.pac_codigo, ai.dthr_internacao, ai.dt_saida_paciente, ai.esp
 
 ---
 
-## 🔍 Política de Verificação de Índices
-
-Antes de sugerir novos índices, execute:
-
-```sql
-SELECT
-    tab.relname AS tabela,
-    idx.relname AS indice,
-    am.amname AS tipo,
-    ARRAY_AGG(att.attname) AS colunas
-FROM
-    pg_class tab
-    JOIN pg_index ind ON tab.oid = ind.indrelid
-    JOIN pg_class idx ON idx.oid = ind.indexrelid
-    JOIN pg_am am ON idx.relam = am.oid
-    JOIN pg_attribute att ON att.attrelid = tab.oid AND att.attnum = ANY(ind.indkey)
-WHERE
-    tab.relname IN ('ain_internacoes', 'ain_cids_internacao')
-GROUP BY tab.relname, idx.relname, am.amname
-ORDER BY tab.relname, idx.relname;
-```
-
----
-
-## ✅ Conclusão
+## 📎 Considerações Finais
 
 A solução proposta apresenta **boa performance, uso correto de índices**, aproveitamento de recursos como `Memoize` e `WindowAgg`, e está pronta para **escalabilidade moderada** com melhorias pontuais por materialização. Os `Seq Scan` foram analisados e são justificados pelo volume e ausência de filtros seletivos.
