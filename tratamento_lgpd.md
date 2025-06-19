@@ -20,8 +20,8 @@ Durante a análise, os seguintes campos sensíveis foram identificados e tratado
 ### 🔤 Nome
 
 - Utilizado `INITCAP(SPLIT_PART(...))` para obter o primeiro nome com letra maiúscula;
-- Utilizado `REGEXP_REPLACE(SUBSTRING(...))` para extrair a inicial do sobrenome com sufixo `.`;
-- Exemplo: `Jose Carlos` → `Jose C.`
+- Utilizado `REGEXP_REPLACE(SUBSTRING(...))` para extrair as iniciais dos sobrenomes com sufixo `.`;
+- Exemplo: `Jose Carlos Dine` → `Jose C. D.`
 
 ### 🔢 CPF
 
