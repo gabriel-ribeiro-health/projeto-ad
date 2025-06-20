@@ -1,4 +1,4 @@
-# Projeto: Análise de Reinternações Precoces – Liberty
+# Projeto: Análise de Reinternações Precoces
 
 ## 📊 Objetivo
 
