@@ -100,3 +100,34 @@ LEFT JOIN especialidade_por_internacao esp1 ON esp1.seq_internacao = r.seq_inter
 LEFT JOIN especialidade_por_reinternacao esp2 ON esp2.seq_reinternacao = r.seq_reinternacao
 INNER JOIN agh.aip_pacientes pac ON pac.codigo = r.pac_codigo
 ORDER BY r.seq_internacao;
+
+
+-- Relatório de reinternações precoces por especialidade
+WITH internacoes_ordenadas AS (
+    SELECT
+        pac_codigo,
+        seq AS seq_internacao,
+        dthr_internacao,
+        dt_saida_paciente,
+        LEAD(dthr_internacao) OVER (PARTITION BY pac_codigo ORDER BY dthr_internacao) AS entrada_reinternacao
+    FROM agh.ain_internacoes
+    WHERE dthr_internacao BETWEEN '2024-01-01' AND '2024-12-31'
+),
+reinternacoes_precoces AS (
+    SELECT
+        seq_internacao
+    FROM internacoes_ordenadas
+    WHERE
+        entrada_reinternacao IS NOT NULL
+        AND dt_saida_paciente IS NOT NULL
+        AND DATE_PART('day', entrada_reinternacao - dt_saida_paciente) > 0
+        AND DATE_PART('day', entrada_reinternacao - dt_saida_paciente) <= 15
+)
+SELECT
+    esp.nome_especialidade,
+    COUNT(*) AS qtd_reinternacoes_precoces
+FROM agh.ain_internacoes ai
+JOIN reinternacoes_precoces rp ON rp.seq_internacao = ai.seq
+JOIN agh.agh_especialidades esp ON esp.seq = ai.esp_seq
+GROUP BY esp.nome_especialidade
+ORDER BY qtd_reinternacoes_precoces DESC;
