@@ -14,12 +14,21 @@ Identificar e analisar eventos de **reinternações precoces (≤ 15 dias)** dur
 
 ## ⚙️ Estrutura da Solução
 
-A query foi dividida em **CTEs** para organização e performance:
+A query principal (`script_reinternacoes.sql`) foi dividida em **CTEs** para organização e performance:
 
 1. **`internacoes_ordenadas`** – Ordena as internações por paciente e calcula a reinternação seguinte;
 2. **`reinternacoes_precoces`** – Filtra eventos com intervalo positivo e ≤ 15 dias;
 3. **`cid_por_internacao` / `cid_por_reinternacao`** – Recupera CID principal e lista de CIDs secundários para cada internação;
 4. **`especialidade_por_internacao` / `especialidade_por_reinternacao`** – Recupera a especialidade associada à internação e reinternação.
+
+Além disso, o projeto inclui:
+
+- 📊 **Relatório de reinternações por especialidade** (incluso no `script_reinternacoes.sql`)
+- 🧠 **Análises de CIDs** (disponíveis em `cids_analise.sql`):
+  - Top 10 CIDs mais frequentes
+  - Evolução mensal dos 3 principais CIDs
+  - CIDs mais comuns entre reinternações precoces
+  - Validador de internações com mais de 1 CID principal (fluxo incorreto)
 
 ---
 
@@ -69,7 +78,7 @@ Todos os dados foram tratados com base no princípio da **minimização de uso**
 
 ## ✅ Considerações Finais
 
-- A query está preparada para rodar em ambientes PostgreSQL com suporte a CTEs e funções analíticas;
-- Os dados exibidos foram tratados para **uso externo**, garantindo conformidade com a LGPD;
-- A estrutura modular permite **expansão futura**, como inclusão de indicadores assistenciais, taxa de reinternação por especialidade, e agrupamentos regionais.
-
+- A query principal está preparada para rodar em ambientes PostgreSQL com suporte a CTEs e funções analíticas;
+- Os dados foram tratados para **uso externo**, garantindo conformidade com a LGPD;
+- O projeto inclui **relatórios complementares** para análise assistencial (especialidades e CIDs), bem como validações de integridade de dados;
+- A estrutura modular permite **expansão futura** com agrupamentos por perfil de paciente, unidade, ou outros indicadores.
